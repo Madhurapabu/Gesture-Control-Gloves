@@ -1,123 +1,180 @@
-// Code for Gesture Controlled Robotic ARM (Arduino Nano & MPU6050)
-// Circuit Digest
-
-#include <Wire.h> //I2C Wire Library
+#include <Wire.h>
 #include <MPU6050.h>
 
-const int MPU_addr = 0x68; // MPU6050 I2C Address
-int16_t axis_X, axis_Y, axis_Z;
-int minVal = 265;
-int maxVal = 402;
+#define LED_PIN 13
+#define TOUCH_SENS 2
 
-double x;
-double y;
-double z;
+// class default I2C address is 0x68
+const MPU6050 accelgyro;
 
-int c = 0;
-double Up_val[2];
-int Up_move;
-int c_up = 0;
-int mov1;
+int16_t ax, ay, az;
+int16_t gx, gy, gz;
+int8_t threshold, count;
+
+float temp;
+bool zero_detect;
+bool TurnOnZI = false;
+
+bool XnegMD, XposMD, YnegMD, YposMD, ZnegMD, ZposMD;
+
+// to hold data in app()
+struct ProcessedData
+{
+  byte x;
+  byte y;
+};
+ProcessedData data;
+
+bool blinkState = false;
+bool gyroState = false;
+const bool isPlotting = false;
 
 void setup()
 {
-  Serial.begin(9600);
-  pinMode(2, INPUT);
-  Wire.begin();                     // Initilize I2C Communication
-  Wire.beginTransmission(MPU_addr); // Start communication with MPU6050
-  Wire.write(0x6B);                 // Writes to Register 6B
-  Wire.write(0);                    // Writes 0 into 6B Register to Reset
-  Wire.endTransmission(true);       // Ends I2C transmission
+  // configure Arduino LED for
+  pinMode(LED_PIN, OUTPUT);
+
+  // join I2C bus
+  Wire.begin();
+
+  // initialize serial communication
+  Serial.begin(38400);
+
+  // initialize device
+  accelgyro.initialize();
+  Serial.println("debug-initialized");
+
+  // verify connection
+  gyroState = accelgyro.testConnection();
+
+  if (gyroState)
+  {
+    // on connection success
+    Serial.println("debug-mou-success");
+  }
+  else
+  {
+    // on connection failed
+    Serial.println("debug-mpu-failed");
+  }
+
+  // some settings, idk what happens
+  accelgyro.setAccelerometerPowerOnDelay(3);
+  accelgyro.setIntZeroMotionEnabled(TurnOnZI);
+  accelgyro.setMotionDetectionDuration(40);
+  accelgyro.setZeroMotionDetectionDuration(1);
+}
+
+// output data as serial output line to use in arduino plotter
+void plotting()
+{
+  // read raw accel/gyro measurements from device
+  accelgyro.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
+
+  XnegMD = accelgyro.getXNegMotionDetected();
+  XposMD = accelgyro.getXPosMotionDetected();
+  YnegMD = accelgyro.getYNegMotionDetected();
+  YposMD = accelgyro.getYPosMotionDetected();
+  ZnegMD = accelgyro.getZNegMotionDetected();
+  ZposMD = accelgyro.getZPosMotionDetected();
+
+  zero_detect = accelgyro.getIntMotionStatus();
+  threshold = accelgyro.getZeroMotionDetectionThreshold();
+
+  // get internal temperature
+  // temp = (accelgyro.getTemperature() / 340.) + 36.53;
+
+  // accelerometer reading
+  Serial.print(ax / 16384.);
+  Serial.print(" ");
+  Serial.print(ay / 16384.);
+  Serial.print(" ");
+  Serial.print(az / 16384.);
+  Serial.print(" ");
+
+  // gyroscope reading
+  // Serial.print(gx / 131.072);
+  // Serial.print(" ");
+  // Serial.print(gy / 131.072);
+  // Serial.print(" ");
+  // Serial.print(gz / 131.072);
+  // Serial.print(" ");
+
+  Serial.print(zero_detect);
+  Serial.print(" ");
+
+  Serial.print(XnegMD);
+  Serial.print(" ");
+
+  Serial.println(XposMD);
+
+  // sleep 100ms
+  delay(100);
+
+  // toggle LED
+  blinkState = !blinkState;
+  digitalWrite(LED_PIN, blinkState);
+}
+
+// pass to python
+void app()
+{
+  // read raw accel/gyro measurements from device
+  accelgyro.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
+
+  data.x = map(ax, -17000, 17000, 0, 255); // X axis data
+  data.y = map(ay, -17000, 17000, 0, 255); // Y axis data
+
+  // delay 250ms
+  delay(250);
+
+  if (data.y < 100)
+  {
+    Serial.println("gesture-right");
+  }
+  if (data.y > 175)
+  {
+    Serial.println("gesture-left");
+  }
+  if (data.x > 175)
+  {
+    // Serial.println("gesture-skip");
+  }
+  if (data.x < 70)
+  {
+    Serial.println("gesture-down");
+  }
+  if (data.x > 70 && data.x < 170 && data.y > 80 && data.y < 130)
+  {
+    Serial.println("gesture-up");
+  }
 }
 
 void loop()
 {
-  if (digitalRead(2) == HIGH)
+  // avoid looping if gyro sensor isn't connected
+  if (!gyroState)
   {
-
-    Wire.beginTransmission(MPU_addr);
-    Wire.write(0x3B); // Start with regsiter 0x3B
-    Wire.endTransmission(false);
-    Wire.requestFrom(MPU_addr, 14, true); // Read 14 Registers
-
-    axis_X = Wire.read() << 8 | Wire.read(); // Reads the MPU6050 X,Y,Z AXIS Value
-    axis_Y = Wire.read() << 8 | Wire.read();
-    axis_Z = Wire.read() << 8 | Wire.read();
-
-    int xAng = map(axis_X, minVal, maxVal, -90, 90); // Maps axis values in terms of -90 to +90
-    int yAng = map(axis_Y, minVal, maxVal, -90, 90);
-    int zAng = map(axis_Z, minVal, maxVal, -90, 90);
-
-    x = RAD_TO_DEG * (atan2(-yAng, -zAng) + PI); // Formula to convert into degree
-    y = RAD_TO_DEG * (atan2(-xAng, -zAng) + PI);
-    z = RAD_TO_DEG * (atan2(-yAng, -xAng) + PI);
-
-    if (x > 20 && x <= 60)
+    // keep LED on to display something is wrong
+    digitalWrite(LED_PIN, true);
+  }
+  else
+  {
+    if (isPlotting)
     {
-      mov1 = map(x, 0, 60, 0, 90);
-
-      if (mov1 > 70)
+      plotting();
+    }
+    else
+    {
+      if (digitalRead(TOUCH_SENS))
       {
-        Serial.println("Left");
-        Serial.println("..............");
-        // Serial.println((char)176);
-        // servo_1.write(mov1););
-        // Serial.println("no move");
-        delay(200);
+        // run application
+        app();
+      }
+      else
+      {
+        digitalWrite(LED_PIN, false);
       }
     }
-    else if (x >= 320 && x <= 360)
-    {
-      int mov2 = map(x, 360, 250, 0, 180);
-
-      if (mov2 > 50)
-      {
-        Serial.println("Right");
-        Serial.println(".......................");
-        // Serial.println((char)176);
-        // servo_2.write(mov2);
-        delay(200);
-      }
-    }
-
-    if (y >= 20 && y <= 60)
-    {
-      int mov3 = map(y, 0, 60, 90, 180);
-      if (mov3 > 160)
-      {
-        Serial.println("Forward");
-        Serial.println("..........");
-        delay(200);
-      }
-    }
-
-    else if (y >= 350 && y <= 360)
-    {
-      int mov3 = map(y, 360, 300, 90, 0);
-
-      if (mov3 > 90)
-      {
-        Serial.print("Movement in Right = ");
-        Serial.println(mov3);
-      }
-    }
-    /* if (c_up == 0){
-       Up_val[0] = mov1;
-       c_up = c_up + 1;
-       Serial.println (Up_val[0]);
-     }
-     if (c_up == 1){
-       Up_val[1] = mov1;
-       c_up = c_up + 1;
-       Serial.println (Up_val[1]);
-     }
-     if (c_up == 2 ){
-       Up_move = Up_val[1] - Up_val[0];
-        Up_val[0] = 0;
-        Up_val[1] = 0;
-        c_up = 0;
-     }
-     Serial.println(Up_move); */
-    delay(20);
   }
 }
