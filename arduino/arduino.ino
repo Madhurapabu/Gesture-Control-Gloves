@@ -1,8 +1,9 @@
 #include <Wire.h>
 #include <MPU6050.h>
 
-#define LED_PIN 13
 #define TOUCH_SENS 2
+#define TOUCH_LED 12
+#define LED_PIN 13
 
 // class default I2C address is 0x68
 const MPU6050 accelgyro;
@@ -31,7 +32,11 @@ const bool isPlotting = false;
 
 void setup()
 {
-  // configure Arduino LED for
+  // configure touch sensor
+  pinMode(TOUCH_SENS, INPUT);
+
+  // configure LEDs
+  pinMode(TOUCH_LED, OUTPUT);
   pinMode(LED_PIN, OUTPUT);
 
   // join I2C bus
@@ -50,7 +55,7 @@ void setup()
   if (gyroState)
   {
     // on connection success
-    Serial.println("debug-mou-success");
+    Serial.println("debug-mpu-success");
   }
   else
   {
@@ -160,21 +165,18 @@ void loop()
   }
   else
   {
-    if (isPlotting)
+    if (digitalRead(TOUCH_SENS) == 1)
     {
-      plotting();
+      // run application
+      digitalWrite(TOUCH_LED, true);
+      app();
     }
     else
     {
-      if (digitalRead(TOUCH_SENS))
-      {
-        // run application
-        app();
-      }
-      else
-      {
-        digitalWrite(LED_PIN, false);
-      }
+      digitalWrite(TOUCH_LED, false);
+
+      Serial.println("no-touch");
+      delay(250);
     }
   }
 }
